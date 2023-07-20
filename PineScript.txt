@@ -1,0 +1,178 @@
+//@version=4
+study(title="(10. OB) Order Blocks (5)", overlay=true,max_bars_back=1000)
+
+
+// Input options
+range = input(title="Candle Range", type=input.integer,defval=15, minval=5, maxval=100, group="BASIC SETTINGS")
+showPD = input(title="Show PDH/PDL", type=input.bool,defval=false, group="Extras")
+
+
+showBearishBOS = input(title="Show Bearish BOS Lines", type=input.bool,defval=false, group="Extras")
+showBullishBOS = input(title="Show Bullish BOS Lines", type=input.bool,defval=false, group="Extras")
+
+
+bearishOBColour = input(title="Bearish OB Colour", type=input.color,defval=color.rgb(255,0,0, 90), group="STYLES")
+bullishOBColour = input(title="Bullish OB Colour", type=input.color,defval=color.rgb(0,255,0, 90), group="STYLES")
+
+
+BOSCandleColour = input(title="BOS Candle Colour", type=input.color,defval=color.yellow, group="STYLES")
+bullishTrendColor = input(title="Bullish Trend Colour", type=input.color,defval=color.lime, group="STYLES")
+bearishTrendColour= input(title="Bearish Trend Colour", type=input.color,defval=color.red, group="STYLES")
+
+
+// candle colouring
+var int CandleColourMode = 0
+var bool BosCandle = false
+
+
+// tracking for entries
+var int lastDownIndex=0
+var float lastDown=0
+var float lastLow=0
+
+
+var int lastUpIndex=0
+var float lastUp=0
+var float lastUpLow=0
+var float lastUpOpen=0
+var float lastHigh=0
+var float lastBullBreakLow=0
+
+
+// structure
+var int structureLowIndex=0
+float structureLow=1000000
+
+
+// order block drawing arrays
+var longBoxes = array.new_box()
+var shortBoxes = array.new_box()
+var bosLines = array.new_line()
+
+
+var int lastLongIndex=0
+var int lastShortIndex=0
+BosCandle:=false
+
+
+PDH = security(syminfo.tickerid,"D",high[1])
+PDL = security(syminfo.tickerid,"D",low[1])
+
+
+if(showPD)
+    var line l_pdh = na, var line l_pdo = na, var line l_pdl = na, var label lbl_pdh = na, var label lbl_pdl = na
+    if barstate.islast
+        lbl_pdh := label.new(bar_index + 8, PDH, "PDH", style=label.style_label_left, textcolor = color.white)
+        lbl_pdl := label.new(bar_index + 8, PDL, "PDL", style=label.style_label_left, textcolor = color.white)
+        l_pdh := line.new(bar_index-1, PDH, bar_index + 8, PDH, extend=extend.left, color=color.blue)
+        l_pdl := line.new(bar_index-1, PDL, bar_index+8, PDL, extend=extend.left, color=color.blue)
+    line.delete(l_pdh[1])
+    line.delete(l_pdo[1])
+    line.delete(l_pdl[1])
+    label.delete(lbl_pdh[1])
+    label.delete(lbl_pdl[1])
+
+
+// functions
+structureLowIndexPointer(len) =>
+    float minValue = highest(high, range)[1]
+    int minIndex = bar_index
+    for i = 1 to len
+        if low[i] < minValue
+            minValue := low[i]
+            minIndex := bar_index[i]
+    minIndex
+
+
+
+
+// get the lowest point in the range
+structureLow:=lowest(low, range)[1]
+structureLowIndex:=structureLowIndexPointer(range)
+
+
+
+
+// bearish break of structure
+if(crossunder(low,structureLow))
+    if((bar_index - lastUpIndex) < 1000)
+        // add bear order block
+        array.push(shortBoxes,box.new(left=lastUpIndex, top=lastHigh, bottom=lastUpLow,right=lastUpIndex, bgcolor=bearishOBColour,border_color=bearishOBColour, extend=extend.right))
+        // add bearish bos line
+        if(showBearishBOS)
+            array.push(bosLines, line.new(structureLowIndex, structureLow, bar_index, structureLow, color= color.red, style=line.style_solid, width = 2))
+        // show bos candle
+        BosCandle:=true
+        // color mode bear
+        CandleColourMode:=0
+        lastShortIndex:=lastUpIndex
+
+
+
+
+
+
+// bullish break of structure?
+if((array.size(shortBoxes)>0))
+    for i = (array.size(shortBoxes)-1) to 0
+        box=array.get(shortBoxes,i)
+        top=box.get_top(box)
+        left=box.get_left(box)
+        if(close>top)
+            // remove the short box
+            box.delete(box)
+            array.remove(shortBoxes, i)
+            // ok to draw?
+            if((bar_index - lastDownIndex) < 1000 and bar_index>lastLongIndex)
+                // add bullish order block
+                array.push(longBoxes, box.new(left=lastDownIndex, top=lastDown, bottom=lastLow,right=lastDownIndex, bgcolor=bullishOBColour,border_color=bullishOBColour, extend=extend.right))
+                // add bullish bos line
+                if(showBullishBOS)
+                    array.push(bosLines, line.new(left, top, bar_index, top, color= color.green, style=line.style_solid, width = 1))
+                // show bos candle
+                BosCandle:=true
+                // colour mode bullish
+                CandleColourMode:=1
+                // record last bull bar index to prevent duplication
+                lastLongIndex:=bar_index
+                lastBullBreakLow:=low
+
+
+
+
+// remove LL if close below
+if((array.size(longBoxes) > 0))
+    for i = (array.size(longBoxes)-1) to 0
+        lbox=array.get(longBoxes,i)
+        bottom=box.get_bottom(lbox)
+        top=box.get_top(lbox)
+        if(close<bottom)
+            array.remove(longBoxes, i)
+            box.delete(lbox)
+
+
+// candle colouring
+CandleColour= CandleColourMode==1?bullishTrendColor:bearishTrendColour
+CandleColour:= BosCandle?BOSCandleColour:CandleColour
+barcolor(CandleColour)
+
+
+
+
+// record last up and down candles
+if(close<open)
+    lastDown:=high
+    lastDownIndex:=bar_index
+    lastLow:=low
+
+
+if(close>open)
+    lastUp:=close
+    lastUpIndex:=bar_index
+    lastUpOpen:=open
+    lastUpLow:=low
+    lastHigh:=high
+   
+// update last high/low for more accurate order block placements
+lastHigh:=high>lastHigh?high:lastHigh
+lastLow:=low<lastLow?low:lastLow
